@@ -106,7 +106,7 @@
         ];
 
         // --- Custom API Implementation ---
-        const apiKey = "No it must reply to the  p"; // The execution environment provides the key at runtime.
+        const apiKey = ""; // The execution environment provides the key at runtime.
 
         const PlanetKillerAPI = {
             async sendMessage(userContent) {
@@ -338,24 +338,67 @@
         // --- Main Application ---
 
         function DiscordClone() {
-          const [appState, setAppState] = useState('welcome'); // 'welcome' | 'cookies' | 'app'
-          const [servers, setServers] = useState([]); 
+          // --- Cookie Persistence Helpers ---
+          const setCookie = (name, value, days = 365) => {
+            const date = new Date();
+            date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
+            const expires = "expires=" + date.toUTCString();
+            // JSON stringify and encode to handle special characters
+            const stringValue = encodeURIComponent(JSON.stringify(value));
+            document.cookie = `${name}=${stringValue};${expires};path=/`;
+          };
+
+          const getCookie = (name, defaultValue) => {
+            const nameEQ = name + "=";
+            const ca = document.cookie.split(';');
+            for(let i = 0; i < ca.length; i++) {
+                let c = ca[i];
+                while (c.charAt(0) === ' ') c = c.substring(1, c.length);
+                if (c.indexOf(nameEQ) === 0) {
+                    try {
+                        const stringValue = c.substring(nameEQ.length, c.length);
+                        return JSON.parse(decodeURIComponent(stringValue));
+                    } catch (e) {
+                        return defaultValue;
+                    }
+                }
+            }
+            return defaultValue;
+          };
+
+          const deleteCookie = (name) => {
+            document.cookie = name + '=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+          };
+
+          const [appState, setAppState] = useState(() => getCookie('nebula_appState', 'welcome')); 
+          const [servers, setServers] = useState(() => getCookie('nebula_servers', [])); 
           const [discoverableServers, setDiscoverableServers] = useState(INITIAL_DISCOVERABLE);
-          const [activeServerId, setActiveServerId] = useState(null); // null = Home/DM View
+          const [activeServerId, setActiveServerId] = useState(null); 
           
           // Navigation State
           const [activeChannelId, setActiveChannelId] = useState('gen');
-          const [activeDMId, setActiveDMId] = useState('friends'); // 'friends' or userId
-          const [dms, setDms] = useState(INITIAL_DMS);
+          const [activeDMId, setActiveDMId] = useState('friends');
+          const [dms, setDms] = useState(() => getCookie('nebula_dms', INITIAL_DMS));
 
-          const [messages, setMessages] = useState({});
+          const [messages, setMessages] = useState(() => getCookie('nebula_messages', {}));
           const [inputMessage, setInputMessage] = useState('');
           const [showMobileSidebar, setShowMobileSidebar] = useState(false);
           const [showUserList, setShowUserList] = useState(true);
           const [showStickerPicker, setShowStickerPicker] = useState(false);
-          const [currentUser, setCurrentUser] = useState({ id: 'me', name: 'You', avatar: 'bg-indigo-400', status: 'online', banner: 'bg-indigo-500', about: 'Just a space traveler.', email: '' });
+          
+          const [currentUser, setCurrentUser] = useState(() => getCookie('nebula_currentUser', { 
+              id: 'me', name: 'You', avatar: 'bg-indigo-400', status: 'online', banner: 'bg-indigo-500', about: 'Just a space traveler.', email: '' 
+          }));
+          
           const [allUsers, setAllUsers] = useState(INITIAL_USERS);
           
+          // --- Persistence Effects (Using Cookies) ---
+          useEffect(() => { setCookie('nebula_appState', appState); }, [appState]);
+          useEffect(() => { setCookie('nebula_servers', servers); }, [servers]);
+          useEffect(() => { setCookie('nebula_dms', dms); }, [dms]);
+          useEffect(() => { setCookie('nebula_messages', messages); }, [messages]);
+          useEffect(() => { setCookie('nebula_currentUser', currentUser); }, [currentUser]);
+
           // Onboarding Form State
           const [tempUsername, setTempUsername] = useState('');
           const [tempEmail, setTempEmail] = useState('');
@@ -409,9 +452,10 @@
             // Only respond to the current user
             if (lastMsg.userId !== 'me') return;
 
+            const isPlanetKillerDM = contextKey === 'u1';
             const isPing = lastMsg.content.trim() === '!ping';
 
-            if (isPing) {
+            if (isPing || isPlanetKillerDM) {
                 // Handle the API call
                 const handleBotResponse = async () => {
                     let responseContent = '';
@@ -420,6 +464,14 @@
                         // Simple local echo
                         await new Promise(r => setTimeout(r, 500));
                         responseContent = `@${currentUser.name} Pong! 🚀`;
+                    } else if (isPlanetKillerDM) {
+                        // Call our Custom API
+                        try {
+                            responseContent = await PlanetKillerAPI.sendMessage(lastMsg.content);
+                        } catch (err) {
+                            console.error("API Error", err);
+                            responseContent = "The void is unreachable.";
+                        }
                     }
 
                     if (responseContent) {
@@ -808,15 +860,25 @@
           };
 
           const handleLogout = () => {
-              if (window.confirm("Are you sure you want to log out?")) {
+              if (window.confirm("Are you sure you want to log out? This will clear your cookies.")) {
+                  // Clear Cookies
+                  deleteCookie('nebula_appState');
+                  deleteCookie('nebula_servers');
+                  deleteCookie('nebula_dms');
+                  deleteCookie('nebula_messages');
+                  deleteCookie('nebula_currentUser');
+
+                  // Reset State
                   setAppState('welcome');
                   setCurrentUser({ id: 'me', name: 'You', avatar: 'bg-indigo-400', status: 'online', banner: 'bg-indigo-500', about: '', email: '' });
+                  setServers([]);
+                  setDms(INITIAL_DMS);
+                  setMessages({});
                   setTempUsername('');
                   setTempEmail('');
                   setTempPassword('');
                   setTempAvatar(null);
                   setActiveModal(null);
-                  setServers([]);
               }
           };
 
