@@ -17,7 +17,10 @@
         "imports": {
             "react": "https://esm.sh/react@18.2.0",
             "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
-            "lucide-react": "https://esm.sh/lucide-react@0.292.0"
+            "lucide-react": "https://esm.sh/lucide-react@0.292.0",
+            "firebase/app": "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js"
         }
     }
     </script>
@@ -45,16 +48,27 @@
           Video, UserPlus, Inbox, Rocket, LogOut, Shield, Globe, Trash, Copy, 
           Edit2, Camera, Volume2, PhoneOff, MicOff, Signal
         } from 'lucide-react';
+        
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+        import { getFirestore, collection, addDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+
+        // --- FIREBASE SETUP ---
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
         // --- Mock Data ---
 
         const INITIAL_DISCOVERABLE = [
-          { id: 'm1', name: 'Midgar', icon: 'M', color: 'bg-indigo-500', description: 'The city of Mako energy.' },
-          { id: 'm2', name: 'Avalanche', icon: 'A', color: 'bg-emerald-500', description: 'Eco-warriors fighting for the planet.' },
-          { id: 'm3', name: 'Shinra Electric', icon: 'S', color: 'bg-red-500', description: 'Powering the world, protecting the future.' },
-          { id: 'm4', name: 'Genshin Impact', icon: 'G', color: 'bg-pink-500', description: 'Step into Teyvat.' },
-          { id: 'm5', name: 'React Developers', icon: 'R', color: 'bg-cyan-500', description: 'A community for React.js enthusiasts.' },
-          { id: 'm6', name: 'Valorant', icon: 'V', color: 'bg-rose-500', description: 'A 5v5 character-based tactical shooter.' },
+          { id: 'm1', name: 'Midgar', icon: 'M', color: 'bg-indigo-500', description: 'The city of Mako energy.', ownerId: 'shinra' },
+          { id: 'm2', name: 'Avalanche', icon: 'A', color: 'bg-emerald-500', description: 'Eco-warriors fighting for the planet.', ownerId: 'barret' },
+          { id: 'm3', name: 'Shinra Electric', icon: 'S', color: 'bg-red-500', description: 'Powering the world, protecting the future.', ownerId: 'president' },
+          { id: 'm4', name: 'Genshin Impact', icon: 'G', color: 'bg-pink-500', description: 'Step into Teyvat.', ownerId: 'mihoyo' },
+          { id: 'm5', name: 'React Developers', icon: 'R', color: 'bg-cyan-500', description: 'A community for React.js enthusiasts.', ownerId: 'facebook' },
+          { id: 'm6', name: 'Valorant', icon: 'V', color: 'bg-rose-500', description: 'A 5v5 character-based tactical shooter.', ownerId: 'riot' },
         ];
 
         const DEFAULT_CHANNELS_TEMPLATE = [
@@ -113,7 +127,7 @@
                 const systemPrompt = `You are Planet Killer. You are a cosmic entity that destroys worlds. 
                 You are cold, arrogant, and speak of entropy, the void, and the inevitable doom of the user's civilization. 
                 You do not have friends. You only have targets. 
-                Your responses should be relatively short (under 20 words), menacing, and dismissive. 
+                Your responses should be relatively long (above 20 words), menacing, and dismissive. 
                 Never break character. You view humans as insignificant rounding errors.`;
 
                 try {
@@ -162,6 +176,216 @@
           </svg>
         );
 
+        // --- PONG GAME COMPONENT ---
+        const PongGame = ({ onClose }) => {
+            const canvasRef = useRef(null);
+            const [difficulty, setDifficulty] = useState(null); // New state for difficulty
+            
+            useEffect(() => {
+                if (difficulty === null) return; // Wait for selection
+
+                const canvas = canvasRef.current;
+                const ctx = canvas.getContext('2d');
+                let animationFrameId;
+                
+                // Game Configuration
+                const paddleWidth = 15;
+                const paddleHeight = 100;
+                const ballSize = 10;
+                let ball = { x: canvas.width / 2, y: canvas.height / 2, dx: 5, dy: 5, speed: 7 };
+                let player = { x: 20, y: canvas.height / 2 - paddleHeight / 2, score: 0 };
+                // Use selected difficulty for AI speed
+                let ai = { x: canvas.width - 35, y: canvas.height / 2 - paddleHeight / 2, score: 0, speed: difficulty };
+
+                const resetBall = () => {
+                    ball.x = canvas.width / 2;
+                    ball.y = canvas.height / 2;
+                    ball.dx = -ball.dx; // Switch serve
+                    ball.speed = 7;
+                };
+
+                const update = () => {
+                    // Move Ball
+                    ball.x += ball.dx;
+                    ball.y += ball.dy;
+
+                    // Wall Collisions (Top/Bottom)
+                    if (ball.y - ballSize < 0 || ball.y + ballSize > canvas.height) {
+                        ball.dy *= -1;
+                    }
+
+                    // Paddle Collisions
+                    // Player
+                    if (ball.x - ballSize < player.x + paddleWidth && ball.y > player.y && ball.y < player.y + paddleHeight) {
+                        ball.dx *= -1;
+                        ball.x = player.x + paddleWidth + ballSize; // Push out to prevent sticking
+                        // Add spin/speed
+                        ball.speed += 0.5;
+                        const deltaY = ball.y - (player.y + paddleHeight / 2);
+                        ball.dy = deltaY * 0.2; 
+                    }
+                    // AI
+                    if (ball.x + ballSize > ai.x && ball.y > ai.y && ball.y < ai.y + paddleHeight) {
+                        ball.dx *= -1;
+                        ball.x = ai.x - ballSize;
+                        ball.speed += 0.5;
+                        const deltaY = ball.y - (ai.y + paddleHeight / 2);
+                        ball.dy = deltaY * 0.2;
+                    }
+
+                    // Scoring
+                    if (ball.x < 0) {
+                        ai.score++;
+                        resetBall();
+                    } else if (ball.x > canvas.width) {
+                        player.score++;
+                        resetBall();
+                    }
+
+                    // AI Movement (Simple Tracking)
+                    const aiCenter = ai.y + paddleHeight / 2;
+                    if (aiCenter < ball.y - 35) {
+                        ai.y += ai.speed;
+                    } else if (aiCenter > ball.y + 35) {
+                        ai.y -= ai.speed;
+                    }
+                    // Keep AI in bounds
+                    if (ai.y < 0) ai.y = 0;
+                    if (ai.y + paddleHeight > canvas.height) ai.y = canvas.height - paddleHeight;
+                };
+
+                const draw = () => {
+                    // Background
+                    ctx.fillStyle = 'black';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Net
+                    ctx.strokeStyle = '#333';
+                    ctx.beginPath();
+                    ctx.setLineDash([10, 15]);
+                    ctx.moveTo(canvas.width / 2, 0);
+                    ctx.lineTo(canvas.width / 2, canvas.height);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    // Scores
+                    ctx.fillStyle = '#444';
+                    ctx.font = "bold 100px monospace";
+                    ctx.textAlign = "center";
+                    ctx.fillText(player.score, canvas.width / 4, 120);
+                    ctx.fillText(ai.score, (canvas.width / 4) * 3, 120);
+
+                    // Paddles
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(player.x, player.y, paddleWidth, paddleHeight);
+                    ctx.fillRect(ai.x, ai.y, paddleWidth, paddleHeight);
+
+                    // Ball
+                    ctx.beginPath();
+                    ctx.arc(ball.x, ball.y, ballSize, 0, Math.PI * 2);
+                    ctx.fill();
+                };
+
+                const loop = () => {
+                    update();
+                    draw();
+                    animationFrameId = requestAnimationFrame(loop);
+                };
+
+                const handleMouseMove = (e) => {
+                    const rect = canvas.getBoundingClientRect();
+                    let mouseY = e.clientY - rect.top - paddleHeight / 2;
+                    // Clamp player paddle
+                    if (mouseY < 0) mouseY = 0;
+                    if (mouseY + paddleHeight > canvas.height) mouseY = canvas.height - paddleHeight;
+                    player.y = mouseY;
+                };
+
+                canvas.addEventListener('mousemove', handleMouseMove);
+                loop();
+
+                return () => {
+                    cancelAnimationFrame(animationFrameId);
+                    canvas.removeEventListener('mousemove', handleMouseMove);
+                };
+            }, [difficulty]); // Re-run if difficulty changes (though UI prevents changing mid-game here)
+
+            // RENDER DIFFICULTY MENU IF NOT SELECTED
+            if (difficulty === null) {
+                return (
+                    <div className="fixed inset-0 bg-black/95 z-[200] flex flex-col items-center justify-center font-mono text-white animate-in fade-in duration-300">
+                        <h1 className="text-6xl font-black tracking-widest mb-8 text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.5)]">PONG</h1>
+                        <p className="text-gray-400 text-sm tracking-widest uppercase mb-8">Select CPU Difficulty</p>
+                        <div className="flex flex-col gap-4 w-64">
+                            <button onClick={() => setDifficulty(4)} className="px-6 py-3 border-2 border-green-500 text-green-500 hover:bg-green-500 hover:text-black transition-all font-bold tracking-widest uppercase rounded">Easy</button>
+                            <button onClick={() => setDifficulty(8)} className="px-6 py-3 border-2 border-yellow-500 text-yellow-500 hover:bg-yellow-500 hover:text-black transition-all font-bold tracking-widest uppercase rounded">Medium</button>
+                            <button onClick={() => setDifficulty(12)} className="px-6 py-3 border-2 border-red-500 text-red-500 hover:bg-red-500 hover:text-black transition-all font-bold tracking-widest uppercase rounded">Hard</button>
+                            <button onClick={() => setDifficulty(20)} className="px-6 py-3 border-2 border-purple-500 text-purple-500 hover:bg-purple-500 hover:text-white hover:shadow-[0_0_20px_rgba(168,85,247,0.8)] transition-all font-bold tracking-widest uppercase rounded">Impossible</button>
+                        </div>
+                        <button onClick={onClose} className="mt-12 text-gray-500 hover:text-white uppercase tracking-widest text-xs">Exit Protocol</button>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="fixed inset-0 bg-black/95 z-[200] flex flex-col items-center justify-center font-mono text-white animate-in fade-in duration-300">
+                    <div className="text-center mb-6">
+                        <h1 className="text-6xl font-black tracking-widest mb-2">PONG</h1>
+                        <p className="text-gray-500 text-sm tracking-widest uppercase">Secret Protocol Initiated</p>
+                    </div>
+                    
+                    <canvas 
+                        ref={canvasRef} 
+                        width={800} 
+                        height={500} 
+                        className="bg-black border-4 border-white shadow-[0_0_50px_rgba(255,255,255,0.2)] cursor-none max-w-full"
+                    />
+                    
+                    <div className="mt-8 flex flex-col items-center gap-4">
+                        <p className="text-gray-400 text-xs uppercase tracking-widest">Controls: Mouse to Move</p>
+                        <button 
+                            onClick={onClose} 
+                            className="px-8 py-3 border-2 border-white hover:bg-white hover:text-black transition-all font-bold tracking-widest uppercase"
+                        >
+                            Exit Game
+                        </button>
+                    </div>
+                </div>
+            );
+        };
+
+        const PlanetKillerLogo = ({ className }) => (
+          <svg viewBox="0 0 24 24" className={className} xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <radialGradient id="magma" cx="0.5" cy="0.5" r="0.5">
+                <stop offset="0%" stopColor="#fff700" />
+                <stop offset="50%" stopColor="#ff4800" />
+                <stop offset="100%" stopColor="#590000" />
+              </radialGradient>
+            </defs>
+            
+            {/* Blazing Asteroid Body (The Rock) */}
+            <path d="M19.5 9.5C19.5 9.5 21 7.5 21 6C21 4.5 19.5 3 18 3C16.5 3 14.5 4.5 14.5 4.5L10.5 2.5L5.5 5.5L3.5 10.5L2.5 15.5L5.5 20.5L10.5 21.5L16.5 20.5L20.5 16.5L21.5 11.5L19.5 9.5Z" fill="url(#magma)" stroke="#ff4800" strokeWidth="1.5" />
+            
+            {/* Burning Craters */}
+            <circle cx="5.5" cy="8.5" r="1" fill="#330000" />
+            <circle cx="18.5" cy="13.5" r="1.5" fill="#330000" />
+
+            {/* Magma Spikes/Eruptions */}
+            <path d="M10.5 2.5 L11.5 0.5 L12.5 2.5 Z" fill="#fff700" className="animate-pulse" />
+            <path d="M20.5 16.5 L23 17 L21 18 Z" fill="#fff700" className="animate-pulse" />
+            <path d="M2.5 15.5 L0.5 16 L2 17.5 Z" fill="#fff700" className="animate-pulse" />
+            
+            {/* RESTORED EVIL EYES */}
+            <path d="M7 10 L10 12 L7 13 Z" fill="#000" stroke="#fff" strokeWidth="0.5" />
+            <path d="M17 10 L14 12 L17 13 Z" fill="#000" stroke="#fff" strokeWidth="0.5" />
+            
+            {/* Evil Jagged Grin */}
+            <path d="M7 15 Q12 20 17 15" stroke="#000" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+            <path d="M8 16 L9 18 L10 16 M12 17 L12.5 19 L13 17 M15 16 L16 18 L17 16" stroke="#000" strokeWidth="1" strokeLinecap="round" />
+          </svg>
+        );
+
         const RockySticker = ({ icon, size = "w-32 h-32" }) => (
           <div className={`${size} relative flex items-center justify-center transition-transform hover:scale-105 select-none`}>
             <AsteroidLogo className="w-full h-full text-[#5865F2]" />
@@ -173,6 +397,69 @@
 
         const Avatar = ({ user, className = "w-8 h-8", textSize = "text-xs", statusIndicator = false }) => {
           if (!user) return null;
+
+          // Special rendering for Planet Killer
+          if (user.id === 'u1') {
+             return (
+                <div className="relative inline-block group">
+                    {/* Blazing Particles */}
+                    <div className="absolute inset-0 pointer-events-none z-0">
+                        {[...Array(12)].map((_, i) => {
+                            const angle = (i / 12) * 360;
+                            const distance = 25;
+                            const tx = Math.cos(angle * Math.PI / 180) * distance;
+                            const ty = Math.sin(angle * Math.PI / 180) * distance;
+                            
+                            return (
+                                <div 
+                                    key={i}
+                                    className="absolute top-1/2 left-1/2 w-1.5 h-1.5 rounded-full bg-[#ff4800] opacity-0"
+                                    style={{
+                                        animation: `blaze 2s infinite linear`,
+                                        animationDelay: `${Math.random() * 2}s`,
+                                        '--tx': `${tx}px`,
+                                        '--ty': `${ty}px`
+                                    }}
+                                />
+                            );
+                        })}
+                    </div>
+                    
+                    {/* ADDED animate-shake to the container */}
+                    <div className={`${className} rounded-full bg-black flex items-center justify-center shadow-[0_0_15px_rgba(255,60,0,0.8)] relative z-10 border border-[#ff4800] animate-shake`}>
+                        <PlanetKillerLogo className="w-full h-full scale-110" /> 
+                    </div>
+                    
+                    {statusIndicator && (
+                        <div className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-[3px] border-[#2b2d31] bg-red-600 animate-pulse z-20`} />
+                    )}
+
+                    <style>{`
+                        @keyframes blaze {
+                            0% { transform: translate(-50%, -50%) scale(1); opacity: 1; box-shadow: 0 0 5px #fff700; }
+                            100% { transform: translate(calc(-50% + var(--tx)), calc(-50% + var(--ty))) scale(0); opacity: 0; }
+                        }
+                        @keyframes shake {
+                            0% { transform: translate(1px, 1px) rotate(0deg); }
+                            10% { transform: translate(-1px, -2px) rotate(-1deg); }
+                            20% { transform: translate(-3px, 0px) rotate(1deg); }
+                            30% { transform: translate(3px, 2px) rotate(0deg); }
+                            40% { transform: translate(1px, -1px) rotate(1deg); }
+                            50% { transform: translate(-1px, 2px) rotate(-1deg); }
+                            60% { transform: translate(-3px, 1px) rotate(0deg); }
+                            70% { transform: translate(3px, 1px) rotate(-1deg); }
+                            80% { transform: translate(-1px, -1px) rotate(1deg); }
+                            90% { transform: translate(1px, 2px) rotate(0deg); }
+                            100% { transform: translate(1px, -2px) rotate(-1deg); }
+                        }
+                        .animate-shake {
+                            animation: shake 0.5s infinite;
+                        }
+                    `}</style>
+                </div>
+             );
+          }
+
           const isImage = user.avatar && (user.avatar.startsWith('http') || user.avatar.startsWith('data:'));
           const statusColors = {
             online: 'bg-green-500',
@@ -289,7 +576,8 @@
         };
 
         const Message = ({ message, user, isMentioned }) => {
-          if (!user) return null;
+          // Fallback to message author data if user not found in local list (for multiplayer support)
+          const displayUser = user || message.author || { name: 'Unknown', avatar: 'bg-gray-500', isBot: false };
           
           const isSticker = message.content.startsWith('::sticker::');
           const stickerData = isSticker ? ROCKY_STICKERS.find(s => s.id === message.content.replace('::sticker::', '')) : null;
@@ -315,13 +603,13 @@
           return (
             <div className={`group flex px-4 py-1 -mx-4 ${isMentioned ? 'bg-[#3c4270]/10 border-l-2 border-[#faa61a] pl-[14px]' : 'hover:bg-gray-700/30'}`}>
               <div className="mr-4 mt-0.5 cursor-pointer hover:opacity-80 flex-shrink-0">
-                 <Avatar user={user} className="w-10 h-10" textSize="text-sm" />
+                 <Avatar user={displayUser} className="w-10 h-10" textSize="text-sm" />
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-2">
                   <span className="font-medium text-white hover:underline cursor-pointer flex items-center">
-                    {user.name}
-                    {user.isBot && <BotTag verified={user.isVerified} />}
+                    {displayUser.name}
+                    {displayUser.isBot && <BotTag verified={displayUser.isVerified} />}
                   </span>
                   <span className="text-xs text-gray-400 pt-0.5">
                     {message.timestamp}
@@ -338,12 +626,11 @@
         // --- Main Application ---
 
         function DiscordClone() {
-          // --- Cookie Persistence Helpers ---
+          // --- Persistence Helpers (Cookies) ---
           const setCookie = (name, value, days = 365) => {
             const date = new Date();
             date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
             const expires = "expires=" + date.toUTCString();
-            // JSON stringify and encode to handle special characters
             const stringValue = encodeURIComponent(JSON.stringify(value));
             document.cookie = `${name}=${stringValue};${expires};path=/`;
           };
@@ -370,6 +657,9 @@
             document.cookie = name + '=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
           };
 
+          // --- STATE ---
+          const [authUser, setAuthUser] = useState(null); // Firebase Auth User
+          
           const [appState, setAppState] = useState(() => getCookie('nebula_appState', 'welcome')); 
           const [servers, setServers] = useState(() => getCookie('nebula_servers', [])); 
           const [discoverableServers, setDiscoverableServers] = useState(INITIAL_DISCOVERABLE);
@@ -380,7 +670,9 @@
           const [activeDMId, setActiveDMId] = useState('friends');
           const [dms, setDms] = useState(() => getCookie('nebula_dms', INITIAL_DMS));
 
-          const [messages, setMessages] = useState(() => getCookie('nebula_messages', {}));
+          // Messages - Now managed by Firebase logic primarily, defaulting to empty
+          const [messages, setMessages] = useState({});
+          
           const [inputMessage, setInputMessage] = useState('');
           const [showMobileSidebar, setShowMobileSidebar] = useState(false);
           const [showUserList, setShowUserList] = useState(true);
@@ -392,11 +684,55 @@
           
           const [allUsers, setAllUsers] = useState(INITIAL_USERS);
           
-          // --- Persistence Effects (Using Cookies) ---
+          // --- Firebase Init & Persistence ---
+          useEffect(() => {
+              const initAuth = async () => {
+                  if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                      await signInWithCustomToken(auth, __initial_auth_token);
+                  } else {
+                      await signInAnonymously(auth);
+                  }
+              };
+              initAuth();
+              const unsubscribe = onAuthStateChanged(auth, (user) => {
+                  setAuthUser(user);
+              });
+              return () => unsubscribe();
+          }, []);
+
+          // Sync Messages from Firestore
+          useEffect(() => {
+              if (!authUser) return;
+              
+              // We listen to the shared messages collection
+              const q = collection(db, 'artifacts', appId, 'public', 'data', 'messages');
+              
+              const unsubscribe = onSnapshot(q, (snapshot) => {
+                  const newMessages = {};
+                  snapshot.forEach(doc => {
+                      const data = doc.data();
+                      const key = data.contextKey;
+                      if (!newMessages[key]) newMessages[key] = [];
+                      newMessages[key].push({ id: doc.id, ...data });
+                  });
+                  
+                  // Sort by creation time
+                  Object.keys(newMessages).forEach(key => {
+                      newMessages[key].sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+                  });
+                  
+                  setMessages(newMessages);
+              }, (error) => {
+                  console.error("Error fetching messages:", error);
+              });
+              
+              return () => unsubscribe();
+          }, [authUser]);
+
+          // Cookie Persistence for other states
           useEffect(() => { setCookie('nebula_appState', appState); }, [appState]);
           useEffect(() => { setCookie('nebula_servers', servers); }, [servers]);
           useEffect(() => { setCookie('nebula_dms', dms); }, [dms]);
-          useEffect(() => { setCookie('nebula_messages', messages); }, [messages]);
           useEffect(() => { setCookie('nebula_currentUser', currentUser); }, [currentUser]);
 
           // Onboarding Form State
@@ -420,17 +756,33 @@
           const [isChangingPassword, setIsChangingPassword] = useState(false);
           const [passwordForm, setPasswordForm] = useState({ current: '', new: '', confirm: '' });
           const [selectedUserProfileId, setSelectedUserProfileId] = useState(null);
+          
+          // New functional states
+          const [isMuted, setIsMuted] = useState(false);
+          const [isDeafened, setIsDeafened] = useState(false);
+          const [friendsTab, setFriendsTab] = useState('online'); // 'online' | 'all'
+          const [discoverSearch, setDiscoverSearch] = useState('');
+          // New state for temporary shake effect
+          const [isShaking, setIsShaking] = useState(false);
+          // NEW: State for Pong Game
+          const [showPongGame, setShowPongGame] = useState(false);
 
           // Form States
           const [newServerName, setNewServerName] = useState('');
           const [newServerColor, setNewServerColor] = useState(SERVER_COLORS[0]);
           const [newServerIcon, setNewServerIcon] = useState(null);
           
+          // Test State for Updates
+          const [showUpdateScreen, setShowUpdateScreen] = useState(false);
+          
           // New Feature States
           const [newChannelName, setNewChannelName] = useState('');
           const [channelToEdit, setChannelToEdit] = useState(null); 
           const [newRoleName, setNewRoleName] = useState('');
           const [newRoleColor, setNewRoleColor] = useState(SERVER_COLORS[0]);
+          
+          // NEW: State for Leave Server Confirmation Modal
+          const [serverToLeave, setServerToLeave] = useState(null);
 
           const fileInputRef = useRef(null);
           const userAvatarInputRef = useRef(null);
@@ -441,7 +793,7 @@
           // Derived state
           const activeServer = servers.find(s => s.id === activeServerId);
           // Messages context key: different if in server or DM
-          const contextKey = activeServer ? activeChannelId : activeDMId;
+          const contextKey = activeServer ? `${activeServer.id}-${activeChannelId}` : activeDMId;
           const currentMessages = messages[contextKey] || [];
 
           // Bot Ping Listener & Planet Killer Logic
@@ -449,8 +801,21 @@
             if (!currentMessages.length) return;
             const lastMsg = currentMessages[currentMessages.length - 1];
             
-            // Only respond to the current user
-            if (lastMsg.userId !== 'me') return;
+            // Only respond if the last message was sent by 'me' (current user) to avoid infinite loops in multiplayer
+            // In multiplayer, 'me' might be anyone, so we check if the author ID matches our current session ID
+            // or we just check if it's NOT the bot itself.
+            if (lastMsg.userId === 'u1') return; // Don't reply to self (Bot)
+
+            // To prevent every client replying, we rely on the client who SENT the message to handle the bot response.
+            // But since this is a simplified clone, we can just check if the message is fresh (handled by logic below mostly)
+            // Ideally, we'd have a backend function. Here, let's just make the user who sent it trigger the bot.
+            if (lastMsg.author?.id !== currentUser.id && lastMsg.userId !== 'me') return;
+
+            // CHECK FOR PONG TRIGGER
+            if (lastMsg.content.trim().toLowerCase() === 'pong') {
+                setShowPongGame(true);
+                return; 
+            }
 
             const isPlanetKillerDM = contextKey === 'u1';
             const isPing = lastMsg.content.trim() === '!ping';
@@ -475,22 +840,35 @@
                     }
 
                     if (responseContent) {
-                        const botMsg = {
-                            id: Date.now(),
-                            userId: 'u1', 
-                            content: responseContent,
-                            timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                        };
-                        setMessages(prev => ({
-                            ...prev,
-                            [contextKey]: [...(prev[contextKey] || []), botMsg]
-                        }));
+                        // Send Bot Message to Firestore
+                        if (authUser) {
+                            await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), {
+                                userId: 'u1',
+                                content: responseContent,
+                                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                                createdAt: Date.now(),
+                                contextKey: contextKey,
+                                author: { 
+                                    id: 'u1', 
+                                    name: 'Planet Killer', 
+                                    avatar: 'bg-blue-600', 
+                                    isBot: true, 
+                                    isVerified: true 
+                                }
+                            });
+                        }
+
+                        // Trigger shake if it's Planet Killer responding
+                        if (isPlanetKillerDM) {
+                            setIsShaking(true);
+                            setTimeout(() => setIsShaking(false), 5000);
+                        }
                     }
                 };
 
                 handleBotResponse();
             }
-          }, [currentMessages, contextKey, currentUser.name]);
+          }, [currentMessages, contextKey, currentUser.name, authUser]);
 
           useEffect(() => {
             if (appState === 'app') {
@@ -498,38 +876,48 @@
             }
           }, [currentMessages, contextKey, appState]);
 
-          const handleSendMessage = (e) => {
+          const handleSendMessage = async (e) => {
             e.preventDefault();
             if (!inputMessage.trim()) return;
+            if (!authUser) return; // Guard against no auth
 
-            const newMessage = {
-              id: Date.now(),
-              userId: 'me',
+            const newMessageData = {
+              userId: 'me', // Keeping for legacy, but author object is better
               content: inputMessage,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              createdAt: Date.now(),
+              contextKey: contextKey,
+              author: { ...currentUser, id: currentUser.id || 'unknown' } // Embed author info
             };
 
-            setMessages(prev => ({
-              ...prev,
-              [contextKey]: [...(prev[contextKey] || []), newMessage]
-            }));
-            setInputMessage('');
-            setShowStickerPicker(false);
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), newMessageData);
+                setInputMessage('');
+                setShowStickerPicker(false);
+            } catch (err) {
+                console.error("Error sending message:", err);
+                alert("Failed to send message. Check console.");
+            }
           };
 
-          const handleSendSticker = (stickerId) => {
-            const newMessage = {
-              id: Date.now(),
+          const handleSendSticker = async (stickerId) => {
+            if (!authUser) return;
+            
+            const newMessageData = {
               userId: 'me',
               content: `::sticker::${stickerId}`,
               timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              createdAt: Date.now(),
+              contextKey: contextKey,
+              author: { ...currentUser, id: currentUser.id || 'unknown' }
             };
 
-            setMessages(prev => ({
-              ...prev,
-              [contextKey]: [...(prev[contextKey] || []), newMessage]
-            }));
-            setShowStickerPicker(false);
+            try {
+                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'messages'), newMessageData);
+                setShowStickerPicker(false);
+            } catch (err) {
+                console.error("Error sending sticker:", err);
+            }
           };
 
           // Close picker when clicking outside
@@ -633,8 +1021,8 @@
                     ...server,
                     channels: server.channels || [...DEFAULT_CHANNELS_TEMPLATE],
                     roles: server.roles || [],
-                    // CHANGE: Make user the owner of joined servers so they can edit channels
-                    ownerId: 'me' 
+                    // CHANGE: Use the server's actual owner ID (or 'system' fallback), not 'me'
+                    ownerId: server.ownerId || 'system' 
                 };
                 setServers([...servers, joinedServer]);
             }
@@ -642,14 +1030,21 @@
             setActiveModal(null);
           };
 
-          const handleLeaveServer = (serverId) => {
-            if (window.confirm("Are you sure you want to leave this server?")) {
-                setServers(prev => prev.filter(s => s.id !== serverId));
-                setActiveServerId(null);
-                if (voiceState.serverId === serverId) {
-                    handleDisconnectVoice();
-                }
-            }
+          // REPLACED: Old handleLeaveServer logic with new Modal trigger
+          const handleLeaveServer = (server) => {
+             setServerToLeave(server);
+          };
+
+          const confirmLeaveServer = () => {
+             if (!serverToLeave) return;
+             
+             setServers(prev => prev.filter(s => s.id !== serverToLeave.id));
+             setActiveServerId(null);
+             
+             if (voiceState.serverId === serverToLeave.id) {
+                 handleDisconnectVoice();
+             }
+             setServerToLeave(null);
           };
 
           const handleJoinVoice = async (channelId, serverId) => {
@@ -865,7 +1260,7 @@
                   deleteCookie('nebula_appState');
                   deleteCookie('nebula_servers');
                   deleteCookie('nebula_dms');
-                  deleteCookie('nebula_messages');
+                  // We don't clear nebula_messages anymore as it's cloud-based
                   deleteCookie('nebula_currentUser');
 
                   // Reset State
@@ -916,7 +1311,7 @@
                                   {isOwner && (
                                     <Settings
                                       size={18} 
-                                      className="text-gray-400 hover:text-white mr-2 opacity-50 hover:opacity-100 transition-all" 
+                                      className="text-gray-400 hover:text-white mr-2 opacity-50 hover:opacity-100 transition-all cursor-pointer" 
                                       onClick={(e) => { 
                                           e.stopPropagation(); 
                                           openSettingsModal();
@@ -926,10 +1321,10 @@
                                   )}
                                   <LogOut 
                                     size={18} 
-                                    className="text-gray-400 hover:text-red-400 mr-2 opacity-50 hover:opacity-100 transition-all" 
+                                    className="text-gray-400 hover:text-red-400 mr-2 opacity-50 hover:opacity-100 transition-all cursor-pointer" 
                                     onClick={(e) => { 
                                         e.stopPropagation(); 
-                                        handleLeaveServer(activeServer.id); 
+                                        handleLeaveServer(activeServer); 
                                     }} 
                                     title="Leave Server"
                                   />
@@ -1085,6 +1480,11 @@
           const renderMainContent = () => {
             // 1. FRIENDS LIST VIEW
             if (!activeServer && activeDMId === 'friends') {
+                const onlineCount = allUsers.filter(u => u.status !== 'offline').length;
+                const filteredUsers = friendsTab === 'online' 
+                    ? allUsers.filter(u => u.status !== 'offline')
+                    : allUsers;
+
                 return (
                     <div className="flex-1 bg-[#313338] flex flex-col min-w-0">
                         {/* Friends Header */}
@@ -1095,22 +1495,28 @@
                             </div>
                             <div className="h-6 w-px bg-gray-600 mr-4"></div>
                             <div className="flex space-x-4">
-                                <button className="text-white bg-gray-600/50 px-2 py-0.5 rounded hover:bg-gray-600">Online</button>
-                                <button className="text-gray-400 hover:text-gray-200 px-2 py-0.5 rounded hover:bg-gray-700">All</button>
-                                <button className="text-gray-400 hover:text-gray-200 px-2 py-0.5 rounded hover:bg-gray-700">Pending</button>
-                                <button className="text-gray-400 hover:text-gray-200 px-2 py-0.5 rounded hover:bg-gray-700">Blocked</button>
-                                <button className="text-white bg-green-600 px-2 py-0.5 rounded hover:bg-green-700 font-medium">Add Friend</button>
-                            </div>
-                             <div className="ml-auto flex items-center space-x-3 text-gray-300">
-                                <Inbox size={24} className="cursor-pointer hover:text-gray-200" />
-                                <HelpCircle size={24} className="cursor-pointer hover:text-gray-200" />
+                                <button 
+                                    onClick={() => setFriendsTab('online')}
+                                    className={`${friendsTab === 'online' ? 'text-white bg-gray-600/50' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'} px-2 py-0.5 rounded transition-colors`}
+                                >
+                                    Online
+                                </button>
+                                <button 
+                                    onClick={() => setFriendsTab('all')}
+                                    className={`${friendsTab === 'all' ? 'text-white bg-gray-600/50' : 'text-gray-400 hover:text-gray-200 hover:bg-gray-700'} px-2 py-0.5 rounded transition-colors`}
+                                >
+                                    All
+                                </button>
                             </div>
                         </header>
                         
                         {/* Friends List Body */}
-                        <div className="flex-1 p-8 flex flex-col">
-                             <div className="text-xs font-bold text-gray-400 uppercase mb-4">Online — {allUsers.filter(u => u.status !== 'offline').length}</div>
-                             {allUsers.filter(u => u.status !== 'offline').map(user => (
+                        <div className="flex-1 p-8 flex flex-col overflow-y-auto custom-scrollbar">
+                             <div className="text-xs font-bold text-gray-400 uppercase mb-4">
+                                {friendsTab === 'online' ? `Online — ${onlineCount}` : `All Friends — ${allUsers.length}`}
+                             </div>
+                             
+                             {filteredUsers.map(user => (
                                  <div 
                                     key={user.id} 
                                     className="flex items-center justify-between p-3 hover:bg-gray-700/50 rounded border-t border-gray-800 cursor-pointer group"
@@ -1159,10 +1565,38 @@
             const activeChannel = activeServer?.channels?.find(c => c.id === activeChannelId) || DEFAULT_CHANNELS_TEMPLATE[0];
             const targetName = isDM ? getUser(activeDMId)?.name : activeChannel.name;
             const targetIcon = isDM ? '@' : '#';
+            
+            // Check if we are in Planet Killer's DM
+            const isPlanetKillerDM = isDM && activeDMId === 'u1';
 
             return (
-                <div className="flex-1 bg-[#313338] flex flex-col min-w-0">
-                     <header className="h-12 px-4 flex items-center shadow-sm flex-shrink-0 border-b border-black/20 bg-[#313338]">
+                <div className={`flex-1 flex flex-col min-w-0 relative overflow-hidden ${isPlanetKillerDM ? 'bg-red-950' : 'bg-[#313338]'} ${isPlanetKillerDM && isShaking ? 'animate-shake' : ''}`}>
+                     
+                     {/* Planet Killer Background Particles */}
+                     {isPlanetKillerDM && (
+                        <div className="absolute inset-0 pointer-events-none z-0">
+                            {[...Array(30)].map((_, i) => (
+                                <div 
+                                    key={i}
+                                    className={`absolute -bottom-4 w-2 h-2 rounded-full ${['bg-red-600', 'bg-orange-500', 'bg-black'][i % 3]}`}
+                                    style={{
+                                        left: `${Math.random() * 100}%`,
+                                        animation: `rise ${3 + Math.random() * 4}s infinite linear`,
+                                        animationDelay: `-${Math.random() * 5}s`,
+                                        opacity: 0.6
+                                    }}
+                                />
+                            ))}
+                            <style>{`
+                                @keyframes rise {
+                                    0% { transform: translateY(0) scale(1); opacity: 0.8; }
+                                    100% { transform: translateY(-100vh) scale(0); opacity: 0; }
+                                }
+                            `}</style>
+                        </div>
+                     )}
+
+                     <header className={`h-12 px-4 flex items-center shadow-sm flex-shrink-0 border-b relative z-10 ${isPlanetKillerDM ? 'bg-red-900/80 border-red-700' : 'bg-[#313338] border-black/20'}`}>
                         <Menu className="mr-4 md:hidden text-gray-300 cursor-pointer" onClick={() => setShowMobileSidebar(!showMobileSidebar)} />
                         <span className="text-gray-400 mr-2 text-2xl font-light">{targetIcon}</span>
                         <h3 className="font-bold text-white mr-4">{targetName}</h3>
@@ -1171,11 +1605,7 @@
                         )}
                         
                         <div className="ml-auto flex items-center space-x-4 text-gray-300">
-                            {isDM && <Phone size={24} className="cursor-pointer hover:text-gray-200" />}
-                            {isDM && <Video size={24} className="cursor-pointer hover:text-gray-200" />}
-                            {!isDM && <Search size={24} className="cursor-pointer hover:text-gray-200 hidden sm:block" />}
-                            <Bell size={24} className="cursor-pointer hover:text-gray-200" />
-                            <Pin size={24} className="cursor-pointer hover:text-gray-200 hidden sm:block" />
+                            {/* ANNIHILATED: Non-functional buttons (Phone, Video, Search, Bell, Pin) removed */}
                             <Users 
                               size={24} 
                               className={`cursor-pointer transition-colors ${showUserList ? 'text-white' : 'text-gray-400 hover:text-gray-200'}`} 
@@ -1220,10 +1650,8 @@
                      {/* Input */}
                      <div className="px-4 pb-6 pt-2 flex-shrink-0">
                         <div className="bg-[#383a40] rounded-lg p-2.5 flex items-center shadow-sm">
-                            <div className="bg-gray-400 rounded-full p-1 mr-3 cursor-pointer hover:text-white text-gray-800 transition-colors">
-                                <Plus size={16} className="text-[#383a40]" strokeWidth={3} />
-                            </div>
-                            <form className="flex-1" onSubmit={handleSendMessage}>
+                            {/* ANNIHILATED: Upload button removed */}
+                            <form className="flex-1 ml-2" onSubmit={handleSendMessage}>
                                 <input
                                     type="text"
                                     value={inputMessage}
@@ -1233,7 +1661,7 @@
                                 />
                             </form>
                             <div className="flex items-center space-x-3 text-gray-400 ml-3">
-                                <Gift size={24} className="cursor-pointer hover:text-gray-200 hidden sm:block" />
+                                {/* ANNIHILATED: Gift button removed */}
                                 
                                 <div className="relative sticker-picker-container">
                                     <Sticker 
@@ -1265,7 +1693,7 @@
                                     )}
                                 </div>
 
-                                <Smile size={24} className="cursor-pointer hover:text-gray-200" />
+                                {/* ANNIHILATED: Emoji button removed */}
                                 {inputMessage.length > 0 && (
                                     <SendHorizontal 
                                         size={24} 
@@ -1398,6 +1826,61 @@
             );
           }
 
+          // --- UPDATE SCREEN OVERLAY ---
+          if (showUpdateScreen) {
+            return (
+                <div className="fixed inset-0 bg-black z-[100] flex flex-col items-center justify-center text-red-600 font-mono animate-in fade-in duration-1000 p-4">
+                    {/* ... update screen content ... */}
+                    <div className="max-w-3xl w-full text-center space-y-8 p-8 border-2 border-red-900/50 bg-black/90 shadow-[0_0_50px_rgba(220,38,38,0.3)] rounded-xl relative overflow-hidden">
+                         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-red-900/20 via-transparent to-transparent opacity-50 pointer-events-none"></div>
+                         
+                         <div className="flex justify-center mb-6">
+                            <AsteroidLogo className="w-24 h-24 text-red-600 animate-pulse" />
+                         </div>
+
+                         <h1 className="text-4xl md:text-6xl font-black tracking-tighter uppercase relative z-10 glitch-text">
+                            Planet Killer Has Arrived
+                         </h1>
+                         
+                         <div className="h-px w-3/4 bg-red-900/50 mx-auto"></div>
+                         
+                         <p className="text-xl md:text-2xl text-red-400 relative z-10 font-bold tracking-wide">
+                            Nebula is going offline in order to make preparations.
+                         </p>
+                         
+                         <div className="pt-12">
+                            <button 
+                                onClick={() => setShowUpdateScreen(false)}
+                                className="text-[10px] text-red-900 hover:text-red-500 transition-colors uppercase tracking-[0.3em] border border-red-900/30 px-4 py-2 rounded hover:border-red-500/50"
+                            >
+                                [ Dismiss Simulation ]
+                            </button>
+                         </div>
+                    </div>
+                    <style>{`
+                        @keyframes glitch {
+                            0% { transform: translate(0) }
+                            20% { transform: translate(-2px, 2px) }
+                            40% { transform: translate(-2px, -2px) }
+                            60% { transform: translate(2px, 2px) }
+                            80% { transform: translate(2px, -2px) }
+                            100% { transform: translate(0) }
+                        }
+                        .glitch-text {
+                            animation: glitch 0.3s cubic-bezier(.25, .46, .45, .94) both infinite;
+                            animation-delay: 2s;
+                            animation-duration: 3s; /* Occasional glitch */
+                        }
+                    `}</style>
+                </div>
+            );
+          }
+
+          // --- PONG GAME OVERLAY ---
+          if (showPongGame) {
+              return <PongGame onClose={() => setShowPongGame(false)} />;
+          }
+
           // --- APP RENDER ---
           return (
             <div className="flex h-screen bg-gray-900 text-gray-100 font-sans overflow-hidden select-none relative">
@@ -1424,6 +1907,9 @@
 
                 <ActionIcon icon={Plus} color="bg-green-600" onClick={openCreateModal} tooltip="Add a Server" />
                 <ActionIcon icon={Compass} color="bg-green-600" onClick={() => setActiveModal('discover')} tooltip="Explore" />
+                
+                <div className="w-8 h-[2px] bg-gray-700 rounded-full my-2"></div>
+                <ActionIcon icon={Rocket} color="bg-red-600" onClick={() => setShowUpdateScreen(true)} tooltip="Test Update (Planet Killer)" />
               </nav>
 
               {/* 2. Secondary Sidebar (Channels or DMs) */}
@@ -1442,8 +1928,20 @@
                         <div className="text-xs text-gray-400 truncate">#1337</div>
                     </div>
                     <div className="flex items-center">
-                        <div className="p-1.5 hover:bg-gray-700 rounded cursor-pointer text-gray-300"><Mic size={18} /></div>
-                        <div className="p-1.5 hover:bg-gray-700 rounded cursor-pointer text-gray-300"><Headphones size={18} /></div>
+                        <div 
+                            className={`p-1.5 rounded cursor-pointer ${isMuted ? 'text-red-500 bg-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}
+                            onClick={() => setIsMuted(!isMuted)}
+                            title={isMuted ? "Unmute" : "Mute"}
+                        >
+                            {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                        </div>
+                        <div 
+                            className={`p-1.5 rounded cursor-pointer ${isDeafened ? 'text-red-500 bg-gray-800' : 'text-gray-300 hover:bg-gray-700'}`}
+                            onClick={() => setIsDeafened(!isDeafened)}
+                            title={isDeafened ? "Undeafen" : "Deafen"}
+                        >
+                            {isDeafened ? <PhoneOff size={18} /> : <Headphones size={18} />}
+                        </div>
                         <div 
                             className="p-1.5 hover:bg-gray-700 rounded cursor-pointer text-gray-300"
                             onClick={() => {
@@ -1906,60 +2404,81 @@
               {/* User Profile Modal (View Other Users) */}
               {activeModal === 'userProfile' && selectedUserProfileId && (
                   <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setActiveModal(null)}>
-                      <div className="bg-[#111214] text-white rounded-xl shadow-2xl w-full max-w-[600px] overflow-hidden relative" onClick={e => e.stopPropagation()}>
-                          {(() => {
-                              const user = getUser(selectedUserProfileId);
-                              if (!user) return null;
-                              return (
-                                  <>
-                                    <div className={`h-32 ${user.banner || 'bg-indigo-500'}`}></div>
-                                    <div className="px-4 pb-4 relative">
-                                        <div className="absolute -top-14 left-4 p-2 bg-[#111214] rounded-full">
-                                            <Avatar user={user} className="w-24 h-24" textSize="text-4xl" statusIndicator={true} />
-                                        </div>
-                                        <div className="ml-32 pt-2 flex justify-end">
-                                            <button 
-                                                className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium transition-colors"
-                                                onClick={(e) => {
-                                                    handleMessageUser(user.id, e);
-                                                    setActiveModal(null);
+                      {(() => {
+                          const user = getUser(selectedUserProfileId);
+                          if (!user) return null;
+                          const isPlanetKiller = user.id === 'u1';
+
+                          return (
+                              <div 
+                                className={`text-white rounded-xl shadow-2xl w-full max-w-[600px] overflow-hidden relative ${isPlanetKiller ? 'bg-red-950 animate-shake border-4 border-red-600 shadow-[0_0_50px_rgba(220,38,38,0.5)]' : 'bg-[#111214]'}`} 
+                                onClick={e => e.stopPropagation()}
+                              >
+                                  {/* Planet Killer Special Effects */}
+                                  {isPlanetKiller && (
+                                    <div className="absolute inset-0 pointer-events-none z-0">
+                                        {[...Array(20)].map((_, i) => (
+                                            <div 
+                                                key={i}
+                                                className={`absolute -bottom-4 w-2 h-2 rounded-full ${['bg-red-600', 'bg-orange-500', 'bg-black'][i % 3]}`}
+                                                style={{
+                                                    left: `${Math.random() * 100}%`,
+                                                    animation: `rise ${2 + Math.random() * 3}s infinite linear`,
+                                                    animationDelay: `-${Math.random() * 5}s`,
+                                                    opacity: 0.6
                                                 }}
-                                            >
-                                                Send Message
-                                            </button>
-                                        </div>
-                                        
-                                        <div className="mt-4 p-4 bg-[#2b2d31] rounded-lg">
-                                            <div className="text-xl font-bold text-white flex items-center">
-                                                {user.name}
-                                                {user.isBot && <BotTag verified={user.isVerified} />}
-                                            </div>
-                                            <div className="text-sm text-gray-300 mb-4">{user.name.toLowerCase().replace(/\s/g, '')}</div>
-                                            
-                                            <div className="h-px bg-gray-600 mb-4"></div>
-                                            
-                                            <div className="mb-4">
-                                                <div className="text-xs font-bold text-gray-400 uppercase mb-1">About Me</div>
-                                                <div className="text-sm text-gray-200">{user.about || "Just another space traveler."}</div>
-                                            </div>
-                                            
-                                            {user.activity && (
-                                                <div className="mb-2">
-                                                    <div className="text-xs font-bold text-gray-400 uppercase mb-1">Activity</div>
-                                                    <div className="text-sm text-gray-200">{user.activity}</div>
-                                                </div>
-                                            )}
-                                            
-                                            <div className="mt-4">
-                                                <div className="text-xs font-bold text-gray-400 uppercase mb-1">Member Since</div>
-                                                <div className="text-sm text-gray-200">Dec 17, 2023</div>
-                                            </div>
-                                        </div>
+                                            />
+                                        ))}
                                     </div>
-                                  </>
-                              );
-                          })()}
-                      </div>
+                                  )}
+
+                                  <div className={`h-32 relative z-10 ${user.banner || 'bg-indigo-500'}`}></div>
+                                  <div className="px-4 pb-4 relative z-10">
+                                      <div className={`absolute -top-14 left-4 p-2 rounded-full ${isPlanetKiller ? 'bg-red-950' : 'bg-[#111214]'}`}>
+                                          <Avatar user={user} className="w-24 h-24" textSize="text-4xl" statusIndicator={true} />
+                                      </div>
+                                      <div className="ml-32 pt-2 flex justify-end">
+                                          <button 
+                                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium transition-colors"
+                                              onClick={(e) => {
+                                                  handleMessageUser(user.id, e);
+                                                  setActiveModal(null);
+                                              }}
+                                          >
+                                              Send Message
+                                          </button>
+                                      </div>
+                                      
+                                      <div className={`mt-4 p-4 rounded-lg ${isPlanetKiller ? 'bg-red-900/50 border border-red-500/30' : 'bg-[#2b2d31]'}`}>
+                                          <div className="text-xl font-bold text-white flex items-center">
+                                              {user.name}
+                                              {user.isBot && <BotTag verified={user.isVerified} />}
+                                          </div>
+                                          <div className="text-sm text-gray-300 mb-4">{user.name.toLowerCase().replace(/\s/g, '')}</div>
+                                          
+                                          <div className="h-px bg-gray-600 mb-4"></div>
+                                          
+                                          <div className="mb-4">
+                                              <div className="text-xs font-bold text-gray-400 uppercase mb-1">About Me</div>
+                                              <div className="text-sm text-gray-200">{user.about || "Just another space traveler."}</div>
+                                          </div>
+                                          
+                                          {user.activity && (
+                                              <div className="mb-2">
+                                                  <div className="text-xs font-bold text-gray-400 uppercase mb-1">Activity</div>
+                                                  <div className="text-sm text-gray-200">{user.activity}</div>
+                                              </div>
+                                          )}
+                                          
+                                          <div className="mt-4">
+                                              <div className="text-xs font-bold text-gray-400 uppercase mb-1">Member Since</div>
+                                              <div className="text-sm text-gray-200">Dec 17, 2023</div>
+                                          </div>
+                                      </div>
+                                  </div>
+                              </div>
+                          );
+                      })()}
                   </div>
               )}
               
@@ -2024,6 +2543,20 @@
                   </div>
               )}
 
+              {/* Leave Server Confirmation Modal */}
+              {serverToLeave && (
+                  <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+                    <div className="bg-[#313338] text-white rounded-lg shadow-2xl w-full max-w-sm p-6 animate-in fade-in zoom-in-95 duration-200">
+                        <h2 className="text-xl font-bold mb-2">Leave '{serverToLeave.name}'?</h2>
+                        <p className="text-gray-400 text-sm mb-6">Are you sure you want to leave <strong>{serverToLeave.name}</strong>? You won't be able to rejoin unless you are re-invited.</p>
+                        <div className="flex justify-end space-x-2">
+                            <button onClick={() => setServerToLeave(null)} className="px-4 py-2 hover:underline text-sm text-gray-300">Cancel</button>
+                            <button onClick={confirmLeaveServer} className="px-6 py-2 bg-red-500 hover:bg-red-600 rounded font-medium text-sm text-white transition-colors">Leave Server</button>
+                        </div>
+                    </div>
+                  </div>
+              )}
+
               {activeModal === 'discover' && (
                 <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
                      <div className="bg-[#313338] text-white rounded-lg shadow-2xl w-full max-w-4xl h-[80vh] flex flex-col overflow-hidden relative">
@@ -2031,14 +2564,22 @@
                             <button onClick={() => setActiveModal(null)} className="absolute top-4 right-4 text-white/70 hover:text-white bg-black/20 p-2 rounded-full backdrop-blur-sm"><X size={24} /></button>
                             <h2 className="text-3xl font-bold mb-2">Find your community on Nebula</h2>
                             <div className="mt-6 w-full max-w-lg relative">
-                                <input type="text" placeholder="Explore communities..." className="w-full py-3 px-4 pl-10 rounded bg-black/40 border-none focus:outline-none focus:ring-2 focus:ring-white/20 placeholder-gray-400 text-white" />
+                                <input 
+                                    type="text" 
+                                    placeholder="Explore communities..." 
+                                    className="w-full py-3 px-4 pl-10 rounded bg-black/40 border-none focus:outline-none focus:ring-2 focus:ring-white/20 placeholder-gray-400 text-white" 
+                                    value={discoverSearch}
+                                    onChange={(e) => setDiscoverSearch(e.target.value)}
+                                />
                                 <Search className="absolute left-3 top-3.5 text-gray-400" size={20} />
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto p-6 bg-[#313338] custom-scrollbar">
                             <h3 className="text-xl font-bold mb-4">Featured Communities</h3>
                             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                                {discoverableServers.map(server => (
+                                {discoverableServers
+                                    .filter(s => s.name.toLowerCase().includes(discoverSearch.toLowerCase()))
+                                    .map(server => (
                                     <div key={server.id} className="bg-[#2b2d31] rounded-lg overflow-hidden hover:shadow-xl hover:bg-[#232428] transition-all group border border-gray-800">
                                         <div className={`h-24 ${server.color} relative`}>
                                             <div className="absolute -bottom-6 left-4 border-4 border-[#2b2d31] rounded-2xl group-hover:border-[#232428] transition-colors">
